@@ -268,4 +268,73 @@ openEmployeeFile=async function(id){
   $('employeeFileContent').innerHTML=`<div class="stats" style="grid-template-columns:repeat(4,1fr)"><div class="stat"><span>الرقم الوظيفي</span><b>${e.employee_number||'-'}</b></div><div class="stat"><span>الإدارة</span><b>${e.department||'-'}</b></div><div class="stat"><span>رصيد الإجازات</span><b>${total}</b></div><div class="stat"><span>العهد</span><b>${assets.filter(x=>x.status==='assigned').length}</b></div></div><div class="request-grid"><div class="request"><h3>${e.full_name}</h3><p>المسمى: ${e.job_title||'-'}<br>الحالة: ${employmentName(e.employment_status||'active')}<br>تاريخ الانضمام: ${e.hire_date||'-'}<br>الدرجة: ${e.grade||'-'}</p></div><div class="request"><h3>بيانات التواصل</h3><p>البريد: ${e.email||'-'}<br>الجوال: ${e.phone||'-'}<br>الهوية: ${e.national_id||'-'}<br>الموقع: ${e.work_location||'-'}</p></div><div class="request"><h3>المدير المباشر</h3><p>${m?.full_name||'غير محدد'}<br>${m?.job_title||'-'}</p></div><div class="request"><h3>الحضور هذا الشهر</h3><p>أيام الحضور: ${att.filter(x=>x.check_in).length}<br>التأخير: ${late} دقيقة<br>الإضافي: ${ot} دقيقة<br>آخر حالة: ${att[0]?.check_in?(att[0].check_out?'منصرف':'حاضر الآن'):'لا يوجد تسجيل'}</p></div></div><div class="panel" style="margin-top:12px"><b>أرصدة الإجازات</b><div class="tablewrap"><table><thead><tr><th>النوع</th><th>السنة</th><th>الأساسي</th><th>المستخدم</th><th>التعديل</th><th>المتبقي</th></tr></thead><tbody>${balanceRows}</tbody></table></div></div><div class="panel" style="margin-top:12px"><div class="toolbar"><b>المستندات</b>${!id.startsWith('demo-')?`<button class="btn primary" onclick="openDocumentUpload('${id}')">+ رفع مستند</button>`:''}</div><div class="tablewrap"><table><thead><tr><th>المستند</th><th>النوع</th><th>انتهاء الصلاحية</th><th>الحالة</th></tr></thead><tbody>${documentRows}</tbody></table></div></div><div class="panel" style="margin-top:12px"><b>السجل الوظيفي</b><div class="step-list">${history}</div></div><div class="panel" style="margin-top:12px"><b>آخر الطلبات</b><div class="tablewrap"><table><thead><tr><th>الطلب</th><th>الفترة</th><th>الحالة</th></tr></thead><tbody>${reqRows}</tbody></table></div></div>`;
   $('employeeFileModal').classList.add('open');
 };
-</script><!-- PeopleFlow HR: employee-profile v14 --></body></html>
+</script><!-- PeopleFlow HR: employee-profile v14 -->
+<script>
+/* PeopleFlow HR: Daily & monthly attendance reports v1 */
+(()=>{
+  const reports=$('reports');
+  if(!reports)return;
+  reports.innerHTML=`
+    <div class="panel">
+      <div class="toolbar"><div><b>تقارير الحضور والانصراف</b><div class="sub">تقارير يومية وشهرية قابلة للتصدير</div></div></div>
+      <div class="request-grid" style="margin-top:14px">
+        <div class="field"><label>التقرير اليومي</label><input id="dailyReportDate" type="date"></div>
+        <div class="field"><label>تقرير الشهر</label><input id="monthlyReportMonth" type="month"></div>
+        <div class="field"><label>نطاق التقرير</label><select id="reportEmployee"><option value="">جميع الموظفين</option></select></div>
+      </div>
+      <div class="dialog-actions" style="margin-top:10px">
+        <button class="btn primary" id="loadDailyReport">عرض التقرير اليومي</button>
+        <button class="btn primary" id="loadMonthlyReport">عرض التقرير الشهري</button>
+        <button class="btn" id="exportDailyReport">تصدير اليومي CSV</button>
+        <button class="btn" id="exportMonthlyReport">تصدير الشهري CSV</button>
+      </div>
+    </div>
+    <div class="stats" id="attendanceReportStats" style="margin-top:16px"></div>
+    <div class="panel" style="margin-top:16px"><div class="toolbar"><b id="attendanceReportTitle">اختر تقريرًا للعرض</b><span class="sub" id="attendanceReportSub"></span></div><div class="tablewrap"><table><thead id="attendanceReportHead"></thead><tbody id="attendanceReportBody"><tr><td class="empty">اختر تقريرًا يوميًا أو شهريًا</td></tr></tbody></table></div></div>`;
+
+  let dailyRows=[],monthlyRows=[];
+  const fmtTime=v=>v?new Date(v).toLocaleTimeString('ar-SA',{timeZone:'Asia/Riyadh',hour:'2-digit',minute:'2-digit'}):'-';
+  const today=()=>typeof riyadhDate==='function'?riyadhDate():new Date().toISOString().slice(0,10);
+  const monthEnd=m=>{const [y,mo]=m.split('-').map(Number);return `${y}-${String(new Date(y,mo,0).getDate()).padStart(2,'0')}`};
+  const csvRows=(name,headers,rows)=>csvDownload(name,headers,rows);
+  function employeeMap(){return new Map((dbEmployees||[]).map(e=>[e.id,e]));}
+  function setStats(items){$('attendanceReportStats').innerHTML=items.map(x=>`<div class="stat"><span>${x[0]}</span><b>${x[1]}</b></div>`).join('')}
+  async function ensureEmployees(){
+    if(!dbEmployees?.length)await loadEmployeeDirectory();
+    const s=$('reportEmployee');
+    if(s&&!s.dataset.loaded){s.innerHTML='<option value="">جميع الموظفين</option>'+(dbEmployees||[]).map(e=>`<option value="${e.id}">${e.full_name} — ${e.employee_number||''}</option>`).join('');s.dataset.loaded='1'}
+  }
+  const selectedEmployees=()=>{const id=$('reportEmployee')?.value;return id?(dbEmployees||[]).filter(e=>e.id===id):(dbEmployees||[])};
+  const selectedEmployeeName=()=>{const id=$('reportEmployee')?.value;return id?(dbEmployees||[]).find(e=>e.id===id)?.full_name||'الموظف المحدد':'جميع الموظفين'};
+
+  async function showDaily(){
+    const date=$('dailyReportDate').value||today();$('dailyReportDate').value=date;await ensureEmployees();
+    const {data,error}=await db.from('attendance').select('employee_id,work_date,check_in,check_out,late_minutes,overtime_minutes,status').eq('work_date',date).order('check_in');
+    if(error){$('attendanceReportBody').innerHTML=`<tr><td>${error.message}</td></tr>`;return}
+    const byEmployee=new Map((data||[]).map(x=>[x.employee_id,x]));
+    dailyRows=selectedEmployees().map(e=>({employee:e,...(byEmployee.get(e.id)||{}),status:byEmployee.get(e.id)?.status||'not_registered'}));
+    const present=dailyRows.filter(x=>x.check_in).length, checkedOut=dailyRows.filter(x=>x.check_out).length, late=dailyRows.filter(x=>Number(x.late_minutes||0)>0).length, absent=dailyRows.length-present;
+    setStats([['إجمالي الموظفين',dailyRows.length],['حاضرون',present],['منصرفون',checkedOut],['لم يسجلوا',absent],['متأخرون',late]]);
+    $('attendanceReportTitle').textContent='التقرير اليومي للحضور والانصراف';$('attendanceReportSub').textContent=`تاريخ التقرير: ${date} — ${selectedEmployeeName()}`;
+    $('attendanceReportHead').innerHTML='<tr><th>الموظف</th><th>الإدارة</th><th>الدخول</th><th>الخروج</th><th>التأخير</th><th>الإضافي</th><th>الحالة</th></tr>';
+    $('attendanceReportBody').innerHTML=dailyRows.map(x=>`<tr><td><b>${x.employee?.full_name||'-'}</b></td><td>${x.employee?.department||'-'}</td><td>${fmtTime(x.check_in)}</td><td>${fmtTime(x.check_out)}</td><td>${Number(x.late_minutes||0)} دقيقة</td><td>${Number(x.overtime_minutes||0)} دقيقة</td><td>${x.check_in?(x.check_out?'منصرف':'حاضر الآن'):'لم يسجل الحضور'}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">لا توجد بيانات</td></tr>';
+  }
+  async function showMonthly(){
+    const month=$('monthlyReportMonth').value||today().slice(0,7);$('monthlyReportMonth').value=month;await ensureEmployees();
+    const {data,error}=await db.from('attendance').select('employee_id,work_date,check_in,check_out,late_minutes,overtime_minutes,status').gte('work_date',`${month}-01`).lte('work_date',monthEnd(month));
+    if(error){$('attendanceReportBody').innerHTML=`<tr><td>${error.message}</td></tr>`;return}
+    const groups=new Map();(data||[]).forEach(x=>{const a=groups.get(x.employee_id)||[];a.push(x);groups.set(x.employee_id,a)});
+    monthlyRows=selectedEmployees().map(employee=>{const rows=groups.get(employee.id)||[];return {employee,present:rows.filter(x=>x.check_in).length,checked_out:rows.filter(x=>x.check_out).length,late_minutes:rows.reduce((n,x)=>n+Number(x.late_minutes||0),0),overtime_minutes:rows.reduce((n,x)=>n+Number(x.overtime_minutes||0),0),days_recorded:rows.length}});
+    const totalPresent=monthlyRows.reduce((n,x)=>n+x.present,0),totalLate=monthlyRows.reduce((n,x)=>n+x.late_minutes,0),totalOvertime=monthlyRows.reduce((n,x)=>n+x.overtime_minutes,0);
+    setStats([['الموظفون',monthlyRows.length],['أيام الحضور',totalPresent],['إجمالي التأخير',`${totalLate} د`],['إجمالي الإضافي',`${totalOvertime} د`]]);
+    $('attendanceReportTitle').textContent='التقرير الشهري للحضور والانصراف';$('attendanceReportSub').textContent=`الشهر: ${month} — ${selectedEmployeeName()}`;
+    $('attendanceReportHead').innerHTML='<tr><th>الموظف</th><th>الإدارة</th><th>أيام مسجلة</th><th>أيام حضور</th><th>أيام انصراف</th><th>إجمالي التأخير</th><th>إجمالي الإضافي</th></tr>';
+    $('attendanceReportBody').innerHTML=monthlyRows.map(x=>`<tr><td><b>${x.employee?.full_name||'-'}</b></td><td>${x.employee?.department||'-'}</td><td>${x.days_recorded}</td><td>${x.present}</td><td>${x.checked_out}</td><td>${x.late_minutes} دقيقة</td><td>${x.overtime_minutes} دقيقة</td></tr>`).join('')||'<tr><td colspan="7" class="empty">لا توجد بيانات</td></tr>';
+  }
+  $('dailyReportDate').value=today();$('monthlyReportMonth').value=today().slice(0,7);
+  $('loadDailyReport').onclick=showDaily;$('loadMonthlyReport').onclick=showMonthly;
+  $('exportDailyReport').onclick=()=>{if(!dailyRows.length)return toast('اعرض التقرير اليومي أولاً');csvRows(`attendance-daily-${$('dailyReportDate').value}.csv`,['الموظف','الإدارة','التاريخ','الدخول','الخروج','التأخير بالدقائق','الإضافي بالدقائق','الحالة'],dailyRows.map(x=>[x.employee?.full_name,x.employee?.department,$('dailyReportDate').value,x.check_in||'',x.check_out||'',x.late_minutes||0,x.overtime_minutes||0,x.check_in?(x.check_out?'منصرف':'حاضر'):'لم يسجل']))};
+  $('exportMonthlyReport').onclick=()=>{if(!monthlyRows.length)return toast('اعرض التقرير الشهري أولاً');csvRows(`attendance-monthly-${$('monthlyReportMonth').value}.csv`,['الموظف','الإدارة','أيام مسجلة','أيام حضور','أيام انصراف','إجمالي التأخير بالدقائق','إجمالي الإضافي بالدقائق'],monthlyRows.map(x=>[x.employee?.full_name,x.employee?.department,x.days_recorded,x.present,x.checked_out,x.late_minutes,x.overtime_minutes]))};
+  loadReports=async function(){await showDaily()};
+})();
+</script></body></html>
