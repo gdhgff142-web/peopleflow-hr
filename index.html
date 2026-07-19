@@ -330,9 +330,17 @@ openEmployeeFile=async function(id){
   }
   function printCurrentReport(){
     const title=$('attendanceReportTitle').textContent,sub=$('attendanceReportSub').textContent;
-    const table=$('.tablewrap',reports)?.innerHTML||'';
+    const sourceTable=$('.tablewrap table',reports);
     const w=window.open('','_blank');if(!w){toast('اسمح بالنوافذ المنبثقة لحفظ PDF');return}
-    w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Tahoma,Arial,sans-serif;padding:28px;color:#182033}h1{margin:0 0 6px}.sub{color:#687086;margin-bottom:20px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #d9deea;padding:9px;text-align:right}th{background:#f3f6fb}.empty{text-align:center;padding:25px}</style></head><body><h1>${title}</h1><div class="sub">${sub}</div><table>${table}</table><script>window.onload=()=>window.print();<\/script></body></html>`);w.document.close();
+    // القالب ثابت بالكامل؛ بيانات التقرير تُضاف كعُقد DOM ونصوص، فلا يمكنها تنفيذ HTML أو JavaScript.
+    w.document.write('<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title></title><style>body{font-family:Tahoma,Arial,sans-serif;padding:28px;color:#182033}h1{margin:0 0 6px}.sub{color:#687086;margin-bottom:20px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #d9deea;padding:9px;text-align:right}th{background:#f3f6fb}.empty{text-align:center;padding:25px}</style></head><body><h1></h1><div class="sub"></div></body></html>');
+    w.document.close();
+    w.document.title=title;
+    w.document.querySelector('h1').textContent=title;
+    w.document.querySelector('.sub').textContent=sub;
+    if(sourceTable)w.document.body.appendChild(w.document.importNode(sourceTable,true));
+    else{const empty=w.document.createElement('div');empty.className='empty';empty.textContent='لا توجد بيانات';w.document.body.appendChild(empty)}
+    setTimeout(()=>{w.focus();w.print()},150);
   }
   function employeeMap(){return new Map((dbEmployees||[]).map(e=>[e.id,e]));}
   function setStats(items){$('attendanceReportStats').innerHTML=items.map(x=>`<div class="stat"><span>${x[0]}</span><b>${x[1]}</b></div>`).join('')}
