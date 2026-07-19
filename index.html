@@ -31,7 +31,28 @@ html,body{max-width:100%;overflow-x:hidden}.app{width:100%;max-width:100%;overfl
 const SUPABASE_URL='https://sgnvitqcygeioecuaxsg.supabase.co';
 const SUPABASE_KEY='sb_publishable_WiHrG2Fq08tSC4X8QTgn5w_alY1JZJP';
 const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);let signup=false,currentProfile=null,myRequests=[];
-const $=id=>document.getElementById(id);function message(text,ok=false){$('authMsg').textContent=text;$('authMsg').className='msg'+(ok?' success':'')}
+const $=id=>document.getElementById(id);
+// حماية طبقة العرض: لا تسمح للنصوص القادمة من قاعدة البيانات بتنفيذ HTML أو JavaScript.
+// نحافظ فقط على أزرار النظام ذات الدوال المحددة أدناه.
+const nativeInnerHTML=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');
+const approvedInlineAction=/^(?:editUser|decide|addChainStep|removeChainStep|openDepartment|openEmployeeFile|openDocumentUpload|readNotification|editEmployee|deleteEmployee|downloadDocument)\((?:'[-A-Za-z0-9_./%:]*'|\d+)(?:,(?:'[-A-Za-z0-9_./%:]*'|\d+))*\)$/;
+function sanitizeRenderedHTML(value){
+  const template=document.createElement('template');
+  nativeInnerHTML.set.call(template,String(value??''));
+  template.content.querySelectorAll('script,iframe,object,embed,base,meta,link,form').forEach(node=>node.remove());
+  template.content.querySelectorAll('*').forEach(node=>{
+    [...node.attributes].forEach(attr=>{
+      const name=attr.name.toLowerCase(),raw=attr.value.trim(),protocol=raw.replace(/[\u0000-\u001f\s]/g,'').toLowerCase();
+      if(name.startsWith('on')){
+        if(name!=='onclick'||!approvedInlineAction.test(raw))node.removeAttribute(attr.name);
+      }
+      if(['href','src','action','formaction','xlink:href'].includes(name)&&/^(?:javascript|vbscript|data):/.test(protocol))node.removeAttribute(attr.name);
+    });
+  });
+  return nativeInnerHTML.get.call(template);
+}
+Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,enumerable:nativeInnerHTML.enumerable,get:nativeInnerHTML.get,set(value){nativeInnerHTML.set.call(this,sanitizeRenderedHTML(value))}});
+function message(text,ok=false){$('authMsg').textContent=text;$('authMsg').className='msg'+(ok?' success':'')}
 $('switchAuth').onclick=()=>{signup=!signup;$('authTitle').textContent=signup?'إنشاء حساب موظف':'تسجيل الدخول';$('authSub').textContent=signup?'أدخل بياناتك لإنشاء حساب':'استخدم بريدك الوظيفي للدخول';$('nameWrap').classList.toggle('hidden',!signup);$('authBtn').textContent=signup?'إنشاء الحساب':'دخول';$('switchText').textContent=signup?'لديك حساب؟':'ليس لديك حساب؟';$('switchAuth').textContent=signup?'تسجيل الدخول':'إنشاء حساب';message('')};
 $('authBtn').onclick=async()=>{const email=$('email').value.trim(),password=$('password').value,name=$('fullName').value.trim();if(!email||!password||(signup&&!name)){message('أكمل جميع الحقول المطلوبة');return}$('authBtn').disabled=true;let result;if(signup)result=await db.auth.signUp({email,password,options:{data:{full_name:name}}});else result=await db.auth.signInWithPassword({email,password});$('authBtn').disabled=false;if(result.error){message(result.error.message);return}if(signup&&!result.data.session){message('تم إنشاء الحساب. افتح بريدك واضغط رابط التأكيد.',true);return}await enterApp(result.data.user)};
 async function enterApp(user){if(!user)return;const {data}=await db.from('profiles').select('*').eq('id',user.id).maybeSingle();currentProfile=data||{id:user.id,full_name:user.user_metadata?.full_name||user.email,email:user.email,role:'employee',department:'غير محدد',is_active:true};if(!currentProfile.is_active){await db.auth.signOut();message('هذا الحساب موقوف. تواصل مع الموارد البشرية.');return}$('loginPage').classList.add('hidden');$('appPage').classList.remove('hidden');$('headerName').textContent=currentProfile.full_name;$('welcomeName').textContent=currentProfile.full_name;$('headerRole').textContent=roleName(currentProfile.role);$('initials').textContent=currentProfile.full_name.slice(0,2);document.querySelectorAll('[data-admin]').forEach(x=>x.classList.toggle('hidden',currentProfile.role!=='admin'));document.querySelectorAll('[data-hr]').forEach(x=>x.classList.toggle('hidden',!['hr','admin'].includes(currentProfile.role)));document.querySelectorAll('[data-approver]').forEach(x=>x.classList.toggle('hidden',!['manager','hr','admin'].includes(currentProfile.role)));await loadRequests();}
@@ -269,6 +290,7 @@ openEmployeeFile=async function(id){
   $('employeeFileModal').classList.add('open');
 };
 </script><!-- PeopleFlow HR: employee-profile v14 -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 /* PeopleFlow HR: Daily & monthly attendance reports v1 */
 (()=>{
@@ -285,8 +307,11 @@ openEmployeeFile=async function(id){
       <div class="dialog-actions" style="margin-top:10px">
         <button class="btn primary" id="loadDailyReport">عرض التقرير اليومي</button>
         <button class="btn primary" id="loadMonthlyReport">عرض التقرير الشهري</button>
-        <button class="btn" id="exportDailyReport">تصدير اليومي CSV</button>
-        <button class="btn" id="exportMonthlyReport">تصدير الشهري CSV</button>
+        <button class="btn" id="exportDailyReport">CSV اليومي</button>
+        <button class="btn" id="exportMonthlyReport">CSV الشهري</button>
+        <button class="btn" id="excelDailyReport">Excel اليومي</button>
+        <button class="btn" id="excelMonthlyReport">Excel الشهري</button>
+        <button class="btn" id="pdfAttendanceReport">حفظ التقرير PDF</button>
       </div>
     </div>
     <div class="stats" id="attendanceReportStats" style="margin-top:16px"></div>
@@ -297,6 +322,18 @@ openEmployeeFile=async function(id){
   const today=()=>typeof riyadhDate==='function'?riyadhDate():new Date().toISOString().slice(0,10);
   const monthEnd=m=>{const [y,mo]=m.split('-').map(Number);return `${y}-${String(new Date(y,mo,0).getDate()).padStart(2,'0')}`};
   const csvRows=(name,headers,rows)=>csvDownload(name,headers,rows);
+  function xlsxDownload(name,headers,rows){
+    if(!window.XLSX){toast('تعذر تحميل مكتبة Excel. تحقق من اتصال الإنترنت ثم أعد المحاولة');return}
+    const sheet=XLSX.utils.aoa_to_sheet([headers,...rows]);
+    sheet['!cols']=headers.map((h,i)=>({wch:Math.max(String(h).length+4,...rows.map(r=>String(r[i]??'').length+2),12)}));
+    const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'تقرير الحضور');XLSX.writeFile(book,name);
+  }
+  function printCurrentReport(){
+    const title=$('attendanceReportTitle').textContent,sub=$('attendanceReportSub').textContent;
+    const table=$('.tablewrap',reports)?.innerHTML||'';
+    const w=window.open('','_blank');if(!w){toast('اسمح بالنوافذ المنبثقة لحفظ PDF');return}
+    w.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Tahoma,Arial,sans-serif;padding:28px;color:#182033}h1{margin:0 0 6px}.sub{color:#687086;margin-bottom:20px}table{width:100%;border-collapse:collapse;font-size:13px}th,td{border:1px solid #d9deea;padding:9px;text-align:right}th{background:#f3f6fb}.empty{text-align:center;padding:25px}</style></head><body><h1>${title}</h1><div class="sub">${sub}</div><table>${table}</table><script>window.onload=()=>window.print();<\/script></body></html>`);w.document.close();
+  }
   function employeeMap(){return new Map((dbEmployees||[]).map(e=>[e.id,e]));}
   function setStats(items){$('attendanceReportStats').innerHTML=items.map(x=>`<div class="stat"><span>${x[0]}</span><b>${x[1]}</b></div>`).join('')}
   async function ensureEmployees(){
@@ -335,6 +372,9 @@ openEmployeeFile=async function(id){
   $('loadDailyReport').onclick=showDaily;$('loadMonthlyReport').onclick=showMonthly;
   $('exportDailyReport').onclick=()=>{if(!dailyRows.length)return toast('اعرض التقرير اليومي أولاً');csvRows(`attendance-daily-${$('dailyReportDate').value}.csv`,['الموظف','الإدارة','التاريخ','الدخول','الخروج','التأخير بالدقائق','الإضافي بالدقائق','الحالة'],dailyRows.map(x=>[x.employee?.full_name,x.employee?.department,$('dailyReportDate').value,x.check_in||'',x.check_out||'',x.late_minutes||0,x.overtime_minutes||0,x.check_in?(x.check_out?'منصرف':'حاضر'):'لم يسجل']))};
   $('exportMonthlyReport').onclick=()=>{if(!monthlyRows.length)return toast('اعرض التقرير الشهري أولاً');csvRows(`attendance-monthly-${$('monthlyReportMonth').value}.csv`,['الموظف','الإدارة','أيام مسجلة','أيام حضور','أيام انصراف','إجمالي التأخير بالدقائق','إجمالي الإضافي بالدقائق'],monthlyRows.map(x=>[x.employee?.full_name,x.employee?.department,x.days_recorded,x.present,x.checked_out,x.late_minutes,x.overtime_minutes]))};
+  $('excelDailyReport').onclick=()=>{if(!dailyRows.length)return toast('اعرض التقرير اليومي أولاً');xlsxDownload(`attendance-daily-${$('dailyReportDate').value}.xlsx`,['الموظف','الإدارة','التاريخ','الدخول','الخروج','التأخير بالدقائق','الإضافي بالدقائق','الحالة'],dailyRows.map(x=>[x.employee?.full_name,x.employee?.department,$('dailyReportDate').value,fmtTime(x.check_in),fmtTime(x.check_out),x.late_minutes||0,x.overtime_minutes||0,x.check_in?(x.check_out?'منصرف':'حاضر'):'لم يسجل']))};
+  $('excelMonthlyReport').onclick=()=>{if(!monthlyRows.length)return toast('اعرض التقرير الشهري أولاً');xlsxDownload(`attendance-monthly-${$('monthlyReportMonth').value}.xlsx`,['الموظف','الإدارة','أيام مسجلة','أيام حضور','أيام انصراف','إجمالي التأخير بالدقائق','إجمالي الإضافي بالدقائق'],monthlyRows.map(x=>[x.employee?.full_name,x.employee?.department,x.days_recorded,x.present,x.checked_out,x.late_minutes,x.overtime_minutes]))};
+  $('pdfAttendanceReport').onclick=()=>{if(!dailyRows.length&&!monthlyRows.length)return toast('اعرض تقريرًا أولاً');printCurrentReport()};
   loadReports=async function(){await showDaily()};
 })();
 </script></body></html>
